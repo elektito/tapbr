@@ -1,1 +1,9 @@
 build/
+.tapbr.*
+tapbr
+_install
+_postbuild
+_postinstall
+_preinstall
+*.map
+*.o
