@@ -44,18 +44,24 @@ static struct rte_eth_conf eth_conf = {
 
 struct rte_mempool *rx_pool;
 
+/* associates a queue number with each lcore */
+static int lcore_queues[RTE_MAX_LCORE];
+
 static int
 bridge_routine(void *arg)
 {
-  int npkts, i, j, q, ret;
+  int npkts, i, j, q, ret, id;
   struct rte_mbuf *pkts[BURST_SIZE];
   struct rte_mbuf *clones[BURST_SIZE];
 
   (void) arg;
 
-  printf("BRIDGE ROUTINE!\n");
+  /* Get the index of the queue associated with this lcore. */
+  id = rte_lcore_id();
+  q = lcore_queues[id];
+  if (q < 0)
+    return 1;
 
-  q = 0;
   fprintf(stderr, "Processing queue %d on CPU %d.\n", q, id);
 
   for (;;) {
@@ -97,10 +103,22 @@ bridge_routine(void *arg)
   return 0;
 }
 
+static int
+get_next_lcore_id(int last)
+{
+  int i;
+
+  i = rte_get_next_lcore(last, 0, 0);
+  if (i != RTE_MAX_LCORE)
+    return i;
+
+  rte_exit(EXIT_FAILURE, "Not enough CPU cores.\n");
+}
+
 int
 main(int argc, char *argv[])
 {
-  int ret, i, j;
+  int ret, i, j, id;
 
   ret = rte_eal_init(argc, argv);
   if (ret < 0) {
@@ -121,6 +139,19 @@ main(int argc, char *argv[])
   if (rte_eth_dev_count() < 3) {
     rte_exit(EXIT_FAILURE,
              "The tap bridge needs three interfaces to function.\n");
+  }
+
+  /* associate an lcore with each queue */
+
+  /* first set all cores to queue -1 and context to NULL. */
+  for (i = 0; i < RTE_MAX_LCORE; i++) {
+    lcore_queues[i] = -1;
+  }
+
+  id = get_next_lcore_id(0);
+  for (i = 0; i < NQUEUES; i++) {
+    lcore_queues[id] = i;
+    id = get_next_lcore_id(id);
   }
 
   for (i = 0; i < 3; ++i) {
