@@ -51,8 +51,11 @@ static int
 bridge_routine(void *arg)
 {
   int npkts, i, j, q, ret, id;
-  struct rte_mbuf *pkts[BURST_SIZE];
-  struct rte_mbuf *clones[BURST_SIZE];
+  struct rte_mbuf **pkts;
+  struct rte_mbuf **clones;
+
+  pkts = (struct rte_mbuf **) malloc(sizeof(struct rte_mbuf *) * BURST_SIZE);
+  clones = (struct rte_mbuf **) malloc(sizeof(struct rte_mbuf *) * BURST_SIZE);
 
   (void) arg;
 
@@ -99,6 +102,9 @@ bridge_routine(void *arg)
       }
     }
   }
+
+  free(pkts);
+  free(clones);
 
   return 0;
 }
