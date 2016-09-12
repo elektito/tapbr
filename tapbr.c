@@ -6,6 +6,7 @@
 #include <rte_ethdev.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 
 #define NQUEUES 1
 
@@ -121,10 +122,71 @@ get_next_lcore_id(int last)
   rte_exit(EXIT_FAILURE, "Not enough CPU cores.\n");
 }
 
+static void
+read_int_environment_var(const char *name, int *target)
+{
+  char *endptr;
+  char *env;
+  int value;
+
+  env = getenv(name);
+  if (env && *env) {
+    value = strtol(env, &endptr, 10);
+    if (*endptr) {
+      printf("Invalid value for %s environment variable.\n", name);
+      exit(1);
+    }
+
+    *target = value;
+  }
+}
+
+static int
+is_power_of_two(unsigned int x)
+{
+  return ((x != 0) && !(x & (x - 1)));
+}
+
+static void
+read_environ(void)
+{
+  read_int_environment_var("PKTMBUF_POOL_SIZE", &PKTMBUF_POOL_SIZE);
+  if (!is_power_of_two(PKTMBUF_POOL_SIZE + 1)) {
+    printf("PKTMUBF_POOL_SIZE must be a power of two minus one.\n");
+    exit(1);
+  }
+
+  read_int_environment_var("PKTMBUF_POOL_CACHE_SIZE", &PKTMBUF_POOL_CACHE_SIZE);
+  if (!is_power_of_two(PKTMBUF_POOL_CACHE_SIZE)) {
+    printf("PKTMUBF_POOL_CACHE_SIZE must be a power of two.\n");
+    exit(1);
+  }
+
+  read_int_environment_var("RX_DESC_PER_QUEUE", &RX_DESC_PER_QUEUE);
+  if (!is_power_of_two(RX_DESC_PER_QUEUE)) {
+    printf("RX_DESC_PER_QUEUE must be a power of two.\n");
+    exit(1);
+  }
+
+  read_int_environment_var("TX_DESC_PER_QUEUE", &TX_DESC_PER_QUEUE);
+  if (!is_power_of_two(TX_DESC_PER_QUEUE)) {
+    printf("TX_DESC_PER_QUEUE must be a power of two.\n");
+    exit(1);
+  }
+
+  read_int_environment_var("BURST_SIZE", &BURST_SIZE);
+  if (!is_power_of_two(BURST_SIZE)) {
+    printf("BURST_SIZE must be a power of two.\n");
+    exit(1);
+  }
+}
+
 int
 main(int argc, char *argv[])
 {
   int ret, i, j, id;
+
+  read_environ();
 
   ret = rte_eal_init(argc, argv);
   if (ret < 0) {
