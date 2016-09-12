@@ -49,6 +49,7 @@ bridge_routine(void *arg)
 {
   int npkts, i, j, q, ret;
   struct rte_mbuf *pkts[BURST_SIZE];
+  struct rte_mbuf *clones[BURST_SIZE];
 
   (void) arg;
 
@@ -66,12 +67,26 @@ bridge_routine(void *arg)
 
       fprintf(stderr, "Got %d packets.\n", npkts);
 
+      for (j = 0; j < npkts; ++j) {
+        clones[j] = rte_pktmbuf_clone(pkts[j], rx_pool);
+      }
+
       ret = rte_eth_tx_burst(i, q, pkts, npkts);
       if (ret != npkts) {
         fprintf(stderr,
                 "Could not write all %d packets into TX ring %d of port %d. "
                 "%d packets dropped.\n",
                 npkts, q, i, npkts - ret);
+        for (j = ret; j < npkts; j++) {
+          rte_pktmbuf_free(pkts[j]);
+        }
+      }
+
+      ret = rte_eth_tx_burst(2, q, clones, npkts);
+      if (ret != npkts) {
+        printf("Could not write all %d packets into TX ring %d of port %d. "
+               "%d packets dropped.\n",
+               npkts, q, i, npkts - ret);
         for (j = ret; j < npkts; j++) {
           rte_pktmbuf_free(pkts[j]);
         }
