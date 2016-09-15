@@ -18,6 +18,9 @@ static const struct argp_option options[] = {
   {"version", 'V', 0, 0, "Print program version and exit.", 0},
   {"queues", 'q', "NQUEUES", 0, "The number of queues used for receiving "
    "and transmitting on network interfaces.", 0},
+  {"intf1", '1', "INTF1", 0, "First bridge interface. Defaults to 0.", 0},
+  {"intf2", '2', "INTF2", 0, "Second bridge interface. Defaults to 1.", 0},
+  {"tap", 'T', "TAP-INTF", 0, "Tap interface. Defaults to 2.", 0},
   { 0 }
 };
 
@@ -29,6 +32,9 @@ static char args_doc[] = "[TAPBR OPTIONS]";
 
 struct arguments {
   int queues;
+  int intf1;
+  int intf2;
+  int tap;
 };
 
 static volatile int keep_running = 1;
@@ -81,9 +87,10 @@ signal_handler(int signum)
 static int
 bridge_routine(void *arg)
 {
-  int npkts, i, j, q, ret, id;
+  int npkts, i, j, q, ret, id, intf, other_intf;
   struct rte_mbuf **pkts;
   struct rte_mbuf **clones;
+  struct arguments *args = arg;
 
   pkts = (struct rte_mbuf **) malloc(sizeof(struct rte_mbuf *) * BURST_SIZE);
   clones = (struct rte_mbuf **) malloc(sizeof(struct rte_mbuf *) * BURST_SIZE);
@@ -100,7 +107,9 @@ bridge_routine(void *arg)
 
   while (likely(keep_running)) {
     for (i = 0; i < 2; ++i) {
-      npkts = rte_eth_rx_burst(i, q, pkts, BURST_SIZE);
+      intf = (i == 0) ? args->intf1 : args->intf2;
+      other_intf = (i == 1) ? args->intf1 : args->intf2;
+      npkts = rte_eth_rx_burst(intf, q, pkts, BURST_SIZE);
       if (npkts == 0) {
         continue;
       }
@@ -111,7 +120,7 @@ bridge_routine(void *arg)
         clones[j] = rte_pktmbuf_clone(pkts[j], rx_pool);
       }
 
-      ret = rte_eth_tx_burst(i, q, pkts, npkts);
+      ret = rte_eth_tx_burst(other_intf, q, pkts, npkts);
       if (ret != npkts) {
         fprintf(stderr,
                 "Could not write all %d packets into TX ring %d of port %d. "
@@ -122,11 +131,11 @@ bridge_routine(void *arg)
         }
       }
 
-      ret = rte_eth_tx_burst(2, q, clones, npkts);
+      ret = rte_eth_tx_burst(args->tap, q, clones, npkts);
       if (ret != npkts) {
         printf("Could not write all %d packets into TX ring %d of port %d. "
                "%d packets dropped.\n",
-               npkts, q, i, npkts - ret);
+               npkts, q, args->tap, npkts - ret);
         for (j = ret; j < npkts; j++) {
           rte_pktmbuf_free(pkts[j]);
         }
@@ -231,6 +240,24 @@ parse_opt(int key, char *arg, struct argp_state *state)
       argp_error(state, "Invalid number passed to --queues.");
     break;
 
+  case '1':
+    args->intf1 = strtol(arg, &end, 10);
+    if (*arg == 0 || end == 0 || *end != 0)
+      argp_error(state, "Invalid number passed to --intf1.");
+    break;
+
+  case '2':
+    args->intf2 = strtol(arg, &end, 10);
+    if (*arg == 0 || end == 0 || *end != 0)
+      argp_error(state, "Invalid number passed to --intf2.");
+    break;
+
+  case 'T':
+    args->tap = strtol(arg, &end, 10);
+    if (*arg == 0 || end == 0 || *end != 0)
+      argp_error(state, "Invalid number passed to --tap.");
+    break;
+
   default:
     return ARGP_ERR_UNKNOWN;
   }
@@ -245,6 +272,9 @@ read_args(int argc, char *argv[], struct arguments *args)
 
   /* set defaults */
   args->queues = 1;
+  args->intf1 = 0;
+  args->intf2 = 1;
+  args->tap = 2;
 
   argp_parse(&argp, argc, argv, 0, 0, args);
 }
@@ -253,7 +283,7 @@ int
 main(int argc, char *argv[])
 {
   struct arguments args;
-  int ret, i, j, id;
+  int ret, i, j, id, intf;
 
   read_environ();
 
@@ -283,6 +313,18 @@ main(int argc, char *argv[])
              "The tap bridge needs three interfaces to function.\n");
   }
 
+  if (args.intf1 >= rte_eth_dev_count()) {
+    rte_exit(EXIT_FAILURE, "No such interface: %d\n", args.intf1);
+  }
+
+  if (args.intf2 >= rte_eth_dev_count()) {
+    rte_exit(EXIT_FAILURE, "No such interface: %d\n", args.intf2);
+  }
+
+  if (args.tap >= rte_eth_dev_count()) {
+    rte_exit(EXIT_FAILURE, "No such interface: %d\n", args.tap);
+  }
+
   /* associate an lcore with each queue */
 
   /* first set all cores to queue -1 and context to NULL. */
@@ -297,45 +339,59 @@ main(int argc, char *argv[])
   }
 
   for (i = 0; i < 3; ++i) {
-    fprintf(stderr, "Initializing port %d...\n", i);
-    if (rte_eth_dev_configure(i, args.queues, args.queues, &eth_conf) < 0) {
-      rte_exit(EXIT_FAILURE, "Could not configure network port %d.\n", i);
+    switch (i) {
+    case 0:
+      intf = args.intf1;
+      break;
+
+    case 1:
+      intf = args.intf2;
+      break;
+
+    case 2:
+      intf = args.tap;
+      break;
+    }
+
+    fprintf(stderr, "Initializing port %d...\n", intf);
+    if (rte_eth_dev_configure(intf, args.queues, args.queues, &eth_conf) < 0) {
+      rte_exit(EXIT_FAILURE, "Could not configure network port %d.\n", intf);
     }
 
     for (j = 0; j < args.queues; ++j) {
-      ret = rte_eth_tx_queue_setup(i, j,
+      ret = rte_eth_tx_queue_setup(intf, j,
                                    TX_DESC_PER_QUEUE,
-                                   rte_eth_dev_socket_id(i),
+                                   rte_eth_dev_socket_id(intf),
                                    0);
       if (ret < 0) {
         rte_exit(EXIT_FAILURE,
                  "Could not setup TX queue %d on network port %d.\n",
-                 j, i);
+                 j, intf);
       }
     }
 
     for (j = 0; j < args.queues; j++) {
       /* TODO: Use multiple pktmbuf pools one for each socket and send
          the appropriate one as the last argument. */
-      ret = rte_eth_rx_queue_setup(i, j,
+      ret = rte_eth_rx_queue_setup(intf, j,
                                    RX_DESC_PER_QUEUE,
-                                   rte_eth_dev_socket_id(i),
+                                   rte_eth_dev_socket_id(intf),
                                    0,
                                    rx_pool);
       if (ret < 0) {
         rte_exit(EXIT_FAILURE,
                  "Could not setup RX queue %d on network port %d.\n",
-                 j, i);
+                 j, intf);
       }
     }
 
-    if (rte_eth_dev_start(i) < 0) {
-      rte_exit(EXIT_FAILURE, "Could not start network port %d.\n", i);
+    if (rte_eth_dev_start(intf) < 0) {
+      rte_exit(EXIT_FAILURE, "Could not start network port %d.\n", intf);
     }
 
-    rte_eth_promiscuous_enable(i);
+    rte_eth_promiscuous_enable(intf);
 
-    fprintf(stderr, "Initialized network port %d successfully.\n", i);
+    fprintf(stderr, "Initialized network port %d successfully.\n", intf);
   }
 
   /* setup signal handlers */
