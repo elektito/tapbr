@@ -9,7 +9,9 @@ appropriately and run `make`.
 To see what command-line options are available, run `./tapbr --
 --help`. The extra `--` is necessary because `tapbr` accepts two sets
 of argument, the first set is passed to initialize DPDK's EAL, the
-second set, separated by `--` is used by `tapbr` itself.
+second set, separated by `--` is used by `tapbr` itself. You need to
+have setup huge pages properly as instructed by the DPDK guides. You
+will also need to run `tapbr` as root.
 
 `tapbr` bridges two network interfaces, while mirroring the entire set
 of traffic either to another interface, or to a number of DPDK
