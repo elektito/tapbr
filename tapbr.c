@@ -4,6 +4,7 @@
 #include <rte_errno.h>
 #include <rte_lcore.h>
 #include <rte_ethdev.h>
+#include <rte_ring.h>
 
 #include <argp.h>
 #include <stdio.h>
@@ -14,6 +15,8 @@
 #define TAPBR_VERSION_MINOR 1
 #define TAPBR_VERSION_REVISION 0
 
+#define RING_PREFIX_MAX_SIZE 256
+
 static const struct argp_option options[] = {
   {"version", 'V', 0, 0, "Print program version and exit.", 0},
   {"queues", 'q', "NQUEUES", 0, "The number of queues used for receiving "
@@ -21,6 +24,16 @@ static const struct argp_option options[] = {
   {"intf1", '1', "INTF1", 0, "First bridge interface. Defaults to 0.", 0},
   {"intf2", '2', "INTF2", 0, "Second bridge interface. Defaults to 1.", 0},
   {"tap", 'T', "TAP-INTF", 0, "Tap interface. Defaults to 2.", 0},
+  {"ring-prefix", 'R', "RING-PREFIX", 0, "Ring name prefix. Instead of "
+   "sending mirrored packets to a network interface, send them to a number "
+   "of DPDK rings (determined by --rings option). The rings will names will "
+   "be made up of this prefix and a sequential number. Defaults to 'tapbr'. "
+   "In order to use DPDK rings as output, you need to use at least one of "
+   "--rings and --ring-prefix options.", 0},
+  {"rings", 'N', "NRINGS", 0, "The number of rings to use as output. Defaults "
+   "to 1. In order to use DPDK rings as output, you need to use at least one "
+   "of --rings and --ring-prefix options. Notice that load balancing between "
+   "multiple rings is only supported when network interfaces support RSS.", 0},
   { 0 }
 };
 
@@ -35,6 +48,8 @@ struct arguments {
   int intf1;
   int intf2;
   int tap;
+  char ring_prefix[RING_PREFIX_MAX_SIZE];
+  int rings;
 };
 
 static volatile int keep_running = 1;
@@ -44,6 +59,7 @@ static int PKTMBUF_POOL_CACHE_SIZE = 512;
 static int RX_DESC_PER_QUEUE = 1024;
 static int TX_DESC_PER_QUEUE = 1024;
 static int BURST_SIZE = 512;
+static int OUTPUT_RING_SIZE = (1 << 10);
 
 static uint8_t symmetric_hash_key[40] =
   {0x6d, 0x5a, 0x6d, 0x5a, 0x6d, 0x5a, 0x6d, 0x5a, 0x6d, 0x5a,
@@ -72,7 +88,9 @@ static struct rte_eth_conf eth_conf = {
   },
 };
 
-struct rte_mempool *rx_pool;
+static struct rte_mempool *rx_pool;
+
+static struct rte_ring **output_rings;
 
 /* associates a queue number with each lcore */
 static int lcore_queues[RTE_MAX_LCORE];
@@ -87,15 +105,13 @@ signal_handler(int signum)
 static int
 bridge_routine(void *arg)
 {
-  int npkts, i, j, q, ret, id, intf, other_intf;
+  int npkts, i, j, q, ret, id, intf, other_intf, ring_idx;
   struct rte_mbuf **pkts;
   struct rte_mbuf **clones;
   struct arguments *args = arg;
 
   pkts = (struct rte_mbuf **) malloc(sizeof(struct rte_mbuf *) * BURST_SIZE);
   clones = (struct rte_mbuf **) malloc(sizeof(struct rte_mbuf *) * BURST_SIZE);
-
-  (void) arg;
 
   /* Get the index of the queue associated with this lcore. */
   id = rte_lcore_id();
@@ -131,13 +147,29 @@ bridge_routine(void *arg)
         }
       }
 
-      ret = rte_eth_tx_burst(args->tap, q, clones, npkts);
-      if (ret != npkts) {
-        printf("Could not write all %d packets into TX ring %d of port %d. "
-               "%d packets dropped.\n",
-               npkts, q, args->tap, npkts - ret);
-        for (j = ret; j < npkts; j++) {
-          rte_pktmbuf_free(pkts[j]);
+      if (*args->ring_prefix) {
+        /* send mirrored packets to output rings */
+        for (j = 0; j < npkts; ++j) {
+          ring_idx = pkts[j]->hash.rss % args->rings;
+          ret = rte_ring_enqueue(output_rings[ring_idx], pkts[j]);
+          if (ret == -EDQUOT) {
+            fprintf(stderr, "Quota exceeded in output ring: %s%d.\n",
+                    args->ring_prefix, ring_idx);
+          } else if (ret == -ENOBUFS) {
+            fprintf(stderr, "Not enough room in output ring: %s%d.\n",
+                    args->ring_prefix, ring_idx);
+          }
+        }
+      } else {
+        /* send mirrored packets to a tap interface */
+        ret = rte_eth_tx_burst(args->tap, q, clones, npkts);
+        if (ret != npkts) {
+          printf("Could not write all %d packets into TX ring %d of port %d. "
+                 "%d packets dropped.\n",
+                 npkts, q, args->tap, npkts - ret);
+          for (j = ret; j < npkts; j++) {
+            rte_pktmbuf_free(pkts[j]);
+          }
         }
       }
     }
@@ -218,6 +250,12 @@ read_environ(void)
     printf("BURST_SIZE must be a power of two.\n");
     exit(1);
   }
+
+  read_int_environment_var("OUTPUT_RING_SIZE", &OUTPUT_RING_SIZE);
+  if (!is_power_of_two(OUTPUT_RING_SIZE)) {
+    printf("OUTPUT_RING_SIZE must be a power of two.\n");
+    exit(1);
+  }
 }
 
 static error_t
@@ -258,6 +296,16 @@ parse_opt(int key, char *arg, struct argp_state *state)
       argp_error(state, "Invalid number passed to --tap.");
     break;
 
+  case 'R':
+    strncpy(args->ring_prefix, arg, RING_PREFIX_MAX_SIZE - 1);
+    break;
+
+  case 'N':
+    args->rings = strtol(arg, &end, 10);
+    if (*arg == 0 || end == 0 || *end != 0)
+      argp_error(state, "Invalid number passed to --rings.");
+    break;
+
   default:
     return ARGP_ERR_UNKNOWN;
   }
@@ -274,9 +322,22 @@ read_args(int argc, char *argv[], struct arguments *args)
   args->queues = 1;
   args->intf1 = 0;
   args->intf2 = 1;
-  args->tap = 2;
+  args->tap = -1;
+  *args->ring_prefix = 0;
+  args->rings = 0;
 
   argp_parse(&argp, argc, argv, 0, 0, args);
+
+  if (args->tap != -1 && (args->rings || *args->ring_prefix)) {
+    rte_exit(EXIT_FAILURE,
+             "--tap cannot be used with --rings or --ring-prefix.\n");
+  } else if (args->rings && !*args->ring_prefix) {
+    strcpy(args->ring_prefix, "tapbr");
+  } else if ((!args->rings) & *args->ring_prefix) {
+    args->rings = 1;
+  } else if (args->tap == -1) {
+    args->tap = 2;
+  }
 }
 
 int
@@ -284,6 +345,7 @@ main(int argc, char *argv[])
 {
   struct arguments args;
   int ret, i, j, id, intf;
+  char ring_name[RING_PREFIX_MAX_SIZE + 20];
 
   read_environ();
 
@@ -325,6 +387,19 @@ main(int argc, char *argv[])
     rte_exit(EXIT_FAILURE, "No such interface: %d\n", args.tap);
   }
 
+  /* create output rings if necessary */
+  if (*args.ring_prefix) {
+    fprintf(stderr, "Creating output rings...\n");
+    output_rings = malloc(sizeof(struct rte_ring *) * args.rings);
+    for (i = 0; i < args.rings; i++) {
+      snprintf(ring_name, sizeof(ring_name), "%s%d", args.ring_prefix, i);
+      output_rings[i] = rte_ring_create(ring_name,
+                                        OUTPUT_RING_SIZE,
+                                        SOCKET_ID_ANY,
+                                        RING_F_SP_ENQ);
+    }
+  }
+
   /* associate an lcore with each queue */
 
   /* first set all cores to queue -1 and context to NULL. */
@@ -350,6 +425,8 @@ main(int argc, char *argv[])
 
     case 2:
       intf = args.tap;
+      if (intf == -1)
+        continue;
       break;
     }
 
@@ -394,12 +471,36 @@ main(int argc, char *argv[])
     fprintf(stderr, "Initialized network port %d successfully.\n", intf);
   }
 
+  /* display bridge info */
+  fprintf(stderr, "\n");
+  fprintf(stderr, "Bridge interfaces: %d and %d\n", args.intf1, args.intf2);
+  if (*args.ring_prefix) {
+    fprintf(stderr, "Tap rings: ");
+    for (i = 0; i < args.rings; i++) {
+      fprintf(stderr, "%s%d", args.ring_prefix, i);
+      if (i != args.rings - 1)
+        fprintf(stderr, ", ");
+    }
+    fprintf(stderr, "\n");
+  } else {
+    fprintf(stderr, "Tap interface: %d\n", args.tap);
+  }
+
+  fprintf(stderr, "\n");
+  fprintf(stderr, "PKTMBUF_POOL_SIZE=%d\n", PKTMBUF_POOL_SIZE);
+  fprintf(stderr, "PKTMBUF_POOL_CACHE_SIZE=%d\n", PKTMBUF_POOL_CACHE_SIZE);
+  fprintf(stderr, "RX_DESC_PER_QUEUE=%d\n", RX_DESC_PER_QUEUE);
+  fprintf(stderr, "TX_DESC_PER_QUEUE=%d\n", TX_DESC_PER_QUEUE);
+  fprintf(stderr, "BURST_SIZE=%d\n", BURST_SIZE);
+  fprintf(stderr, "OUTPUT_RING_SIZE=%d\n", OUTPUT_RING_SIZE);
+  fprintf(stderr, "\n");
+
   /* setup signal handlers */
   signal(SIGINT, signal_handler);
   signal(SIGTERM, signal_handler);
 
   /* launch threads */
-  rte_eal_mp_remote_launch(bridge_routine, 0, CALL_MASTER);
+  rte_eal_mp_remote_launch(bridge_routine, &args, CALL_MASTER);
 
   /* wait on the threads */
   RTE_LCORE_FOREACH_SLAVE(i) {
@@ -409,6 +510,7 @@ main(int argc, char *argv[])
     }
   }
 
+  free(output_rings);
   fprintf(stderr, "\n");
 
   return 0;
