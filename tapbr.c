@@ -5,11 +5,31 @@
 #include <rte_lcore.h>
 #include <rte_ethdev.h>
 
+#include <argp.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
 
-#define NQUEUES 1
+#define TAPBR_VERSION_MAJOR 0
+#define TAPBR_VERSION_MINOR 1
+#define TAPBR_VERSION_REVISION 0
+
+static const struct argp_option options[] = {
+  {"version", 'V', 0, 0, "Print program version and exit.", 0},
+  {"queues", 'q', "NQUEUES", 0, "The number of queues used for receiving "
+   "and transmitting on network interfaces.", 0},
+  { 0 }
+};
+
+static char doc[] = "tapbr is a DPDK-based, mirroring bridge. It bridges "
+  "two network interfaces while sending a copy of all of the traffic to "
+  "either a third interface or a number of DPDK rings.";
+
+static char args_doc[] = "[TAPBR OPTIONS]";
+
+struct arguments {
+  int queues;
+};
 
 static volatile int keep_running = 1;
 
@@ -191,9 +211,48 @@ read_environ(void)
   }
 }
 
+static error_t
+parse_opt(int key, char *arg, struct argp_state *state)
+{
+  struct arguments *args = state->input;
+  char *end;
+
+  switch (key) {
+  case 'V':
+    printf("tapbr v%d.%d.%d\n",
+           TAPBR_VERSION_MAJOR,
+           TAPBR_VERSION_MINOR,
+           TAPBR_VERSION_REVISION);
+    exit(EXIT_SUCCESS);
+
+  case 'q':
+    args->queues = strtol(arg, &end, 10);
+    if (*arg == 0 || end == 0 || *end != 0)
+      argp_error(state, "Invalid number passed to --queues.");
+    break;
+
+  default:
+    return ARGP_ERR_UNKNOWN;
+  }
+
+  return 0;
+}
+
+static void
+read_args(int argc, char *argv[], struct arguments *args)
+{
+  struct argp argp = {options, parse_opt, args_doc, doc, 0, 0, 0};
+
+  /* set defaults */
+  args->queues = 1;
+
+  argp_parse(&argp, argc, argv, 0, 0, args);
+}
+
 int
 main(int argc, char *argv[])
 {
+  struct arguments args;
   int ret, i, j, id;
 
   read_environ();
@@ -203,6 +262,11 @@ main(int argc, char *argv[])
     rte_exit(EXIT_FAILURE,
              "Could not initialize EAL: %s\n", rte_strerror(rte_errno));
   }
+
+  argc -= ret;
+  argv += ret;
+
+  read_args(argc, argv, &args);
 
   /* create mempool */
   rx_pool = rte_pktmbuf_pool_create(
@@ -227,18 +291,18 @@ main(int argc, char *argv[])
   }
 
   id = get_next_lcore_id(0);
-  for (i = 0; i < NQUEUES; i++) {
+  for (i = 0; i < args.queues; i++) {
     lcore_queues[id] = i;
     id = get_next_lcore_id(id);
   }
 
   for (i = 0; i < 3; ++i) {
     fprintf(stderr, "Initializing port %d...\n", i);
-    if (rte_eth_dev_configure(i, NQUEUES, NQUEUES, &eth_conf) < 0) {
+    if (rte_eth_dev_configure(i, args.queues, args.queues, &eth_conf) < 0) {
       rte_exit(EXIT_FAILURE, "Could not configure network port %d.\n", i);
     }
 
-    for (j = 0; j < NQUEUES; ++j) {
+    for (j = 0; j < args.queues; ++j) {
       ret = rte_eth_tx_queue_setup(i, j,
                                    TX_DESC_PER_QUEUE,
                                    rte_eth_dev_socket_id(i),
@@ -250,7 +314,7 @@ main(int argc, char *argv[])
       }
     }
 
-    for (j = 0; j < NQUEUES; j++) {
+    for (j = 0; j < args.queues; j++) {
       /* TODO: Use multiple pktmbuf pools one for each socket and send
          the appropriate one as the last argument. */
       ret = rte_eth_rx_queue_setup(i, j,
