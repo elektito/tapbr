@@ -7,8 +7,11 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 
 #define NQUEUES 1
+
+static volatile int keep_running = 1;
 
 static int PKTMBUF_POOL_SIZE = ((1 << 13) - 1);
 static int PKTMBUF_POOL_CACHE_SIZE = 512;
@@ -48,6 +51,13 @@ struct rte_mempool *rx_pool;
 /* associates a queue number with each lcore */
 static int lcore_queues[RTE_MAX_LCORE];
 
+static void
+signal_handler(int signum)
+{
+  (void) signum;
+  keep_running = 0;
+}
+
 static int
 bridge_routine(void *arg)
 {
@@ -68,7 +78,7 @@ bridge_routine(void *arg)
 
   fprintf(stderr, "Processing queue %d on CPU %d.\n", q, id);
 
-  for (;;) {
+  while (likely(keep_running)) {
     for (i = 0; i < 2; ++i) {
       npkts = rte_eth_rx_burst(i, q, pkts, BURST_SIZE);
       if (npkts == 0) {
@@ -264,6 +274,10 @@ main(int argc, char *argv[])
     fprintf(stderr, "Initialized network port %d successfully.\n", i);
   }
 
+  /* setup signal handlers */
+  signal(SIGINT, signal_handler);
+  signal(SIGTERM, signal_handler);
+
   /* launch threads */
   rte_eal_mp_remote_launch(bridge_routine, 0, CALL_MASTER);
 
@@ -274,6 +288,8 @@ main(int argc, char *argv[])
                "Slave thread returned with a non-zero error code.\n");
     }
   }
+
+  fprintf(stderr, "\n");
 
   return 0;
 }
