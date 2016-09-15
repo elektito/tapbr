@@ -3,7 +3,7 @@ include $(RTE_SDK)/mk/rte.vars.mk
 APP = tapbr
 
 CFLAGS += -O0 -g
-CFLAGS += $(WERROR_FLAGS)
+CFLAGS += $(WERROR_FLAGS) -Werror
 
 SRCS-y := tapbr.c
 
