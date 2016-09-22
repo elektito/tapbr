@@ -407,10 +407,9 @@ main(int argc, char *argv[])
     lcore_queues[i] = -1;
   }
 
-  id = get_next_lcore_id(0);
   for (i = 0; i < args.queues; i++) {
+    id = get_next_lcore_id(0);
     lcore_queues[id] = i;
-    id = get_next_lcore_id(id);
   }
 
   for (i = 0; i < 3; ++i) {
