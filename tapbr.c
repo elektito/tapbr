@@ -335,7 +335,7 @@ read_args(int argc, char *argv[], struct arguments *args)
     strcpy(args->ring_prefix, "tapbr");
   } else if ((!args->rings) & *args->ring_prefix) {
     args->rings = 1;
-  } else if (args->tap == -1) {
+  } else if (args->tap == -1 && !args->rings && !*args->ring_prefix) {
     args->tap = 2;
   }
 }
