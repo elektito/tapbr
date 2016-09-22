@@ -370,7 +370,7 @@ main(int argc, char *argv[])
     rte_socket_id());
 
   /* configure interfaces */
-  if (rte_eth_dev_count() < 3) {
+  if (!*args.ring_prefix && rte_eth_dev_count() < 3) {
     rte_exit(EXIT_FAILURE,
              "The tap bridge needs three interfaces to function.\n");
   }
@@ -383,7 +383,7 @@ main(int argc, char *argv[])
     rte_exit(EXIT_FAILURE, "No such interface: %d\n", args.intf2);
   }
 
-  if (args.tap >= rte_eth_dev_count()) {
+  if (!*args.ring_prefix && args.tap >= rte_eth_dev_count()) {
     rte_exit(EXIT_FAILURE, "No such interface: %d\n", args.tap);
   }
 
