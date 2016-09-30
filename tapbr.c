@@ -164,6 +164,7 @@ bridge_routine(void *arg)
           } else if (ret == -ENOBUFS) {
             fprintf(stderr, "Not enough room in output ring: %s%d.\n",
                     args->ring_prefix, ring_idx);
+            rte_pktmbuf_free(pkts[j]);
           }
         }
       } else {
