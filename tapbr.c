@@ -1,3 +1,5 @@
+#include "dbus.h"
+
 #include <rte_config.h>
 #include <rte_common.h>
 #include <rte_eal.h>
@@ -10,12 +12,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <unistd.h>
 
 #define TAPBR_VERSION_MAJOR 0
 #define TAPBR_VERSION_MINOR 1
 #define TAPBR_VERSION_REVISION 0
 
 #define RING_PREFIX_MAX_SIZE 256
+
+size_t total_pkts = 0;
 
 static const struct argp_option options[] = {
   {"version", 'V', 0, 0, "Print program version and exit.", 0},
@@ -52,7 +57,7 @@ struct arguments {
   int rings;
 };
 
-static volatile int keep_running = 1;
+volatile int keep_running = 1;
 
 static int PKTMBUF_POOL_SIZE = ((1 << 13) - 1);
 static int PKTMBUF_POOL_CACHE_SIZE = 512;
@@ -131,6 +136,7 @@ bridge_routine(void *arg)
       }
 
       fprintf(stderr, "Got %d packets.\n", npkts);
+      total_pkts += npkts;
 
       for (j = 0; j < npkts; ++j) {
         clones[j] = rte_pktmbuf_clone(pkts[j], rx_pool);
@@ -499,6 +505,12 @@ main(int argc, char *argv[])
   signal(SIGTERM, signal_handler);
 
   /* launch threads */
+  ret = dbus_launch();
+  if (ret)
+    fprintf(stderr,
+            "Could not start dbus interface. Make sure tapbr is allowed access "
+            "to system bus by copying tapbr.conf to /etc/dbus-1/system.d/\n");
+
   rte_eal_mp_remote_launch(bridge_routine, &args, CALL_MASTER);
 
   /* wait on the threads */
@@ -508,6 +520,8 @@ main(int argc, char *argv[])
                "Slave thread returned with a non-zero error code.\n");
     }
   }
+
+  dbus_finalize();
 
   free(output_rings);
   fprintf(stderr, "\n");

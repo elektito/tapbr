@@ -24,7 +24,9 @@ appropriate.
 Set the `RTE_SDK` environment variable to where DPDK is built and
 installed, and `RTE_TARGET` to your target environment (for example,
 `x86_64-native-linuxapp-gcc`). Then go to the `tapbr` source directory
-and run `make`.
+and run `make`. Aside from DPDK, you will also need libsystemd
+development files because `tapbr` uses `sd-bus` to expose a dbus
+interface.
 
 ## Usage
 
@@ -121,3 +123,10 @@ the `--`. To see the complete list of DPDK command-line options use:
 To get the complete list of `tapbr` options run:
 
     $ sudo ./tapbr -- -?
+
+## DBus
+
+`tapbr` attempts exposing a dbus interface over the system bus. The
+system bus however, denies access to daemons not explicitly
+allowed. In order to allow `tapbr` access to the system bus, copy
+tapbr.conf to `/etc/dbus-1/system.d/`.
