@@ -21,6 +21,11 @@
 #define RING_PREFIX_MAX_SIZE 256
 
 size_t total_pkts = 0;
+size_t if0_pkts = 0;
+size_t if1_pkts = 0;
+size_t tx_drops = 0;
+size_t ring_enq_drops = 0;
+size_t tap_drops = 0;
 
 static const struct argp_option options[] = {
   {"version", 'V', 0, 0, "Print program version and exit.", 0},
@@ -137,6 +142,10 @@ bridge_routine(void *arg)
 
       fprintf(stderr, "Got %d packets.\n", npkts);
       total_pkts += npkts;
+      if (i == 0)
+        if0_pkts += npkts;
+      else
+        if1_pkts += npkts;
 
       for (j = 0; j < npkts; ++j) {
         clones[j] = rte_pktmbuf_clone(pkts[j], rx_pool);
@@ -151,6 +160,7 @@ bridge_routine(void *arg)
         for (j = ret; j < npkts; j++) {
           rte_pktmbuf_free(pkts[j]);
         }
+        tx_drops += npkts - ret;
       }
 
       if (*args->ring_prefix) {
@@ -165,6 +175,7 @@ bridge_routine(void *arg)
             fprintf(stderr, "Not enough room in output ring: %s%d.\n",
                     args->ring_prefix, ring_idx);
             rte_pktmbuf_free(pkts[j]);
+            ++ring_enq_drops;
           }
         }
       } else {
@@ -177,6 +188,7 @@ bridge_routine(void *arg)
           for (j = ret; j < npkts; j++) {
             rte_pktmbuf_free(pkts[j]);
           }
+          tap_drops += npkts - ret;
         }
       }
     }

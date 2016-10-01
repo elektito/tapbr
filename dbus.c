@@ -15,6 +15,11 @@ static int started = 0;
 extern int keep_running;
 
 extern size_t total_pkts;
+extern size_t if0_pkts;
+extern size_t if1_pkts;
+extern size_t tx_drops;
+extern size_t ring_enq_drops;
+extern size_t tap_drops;
 
 static int
 method_get_stats(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
@@ -38,6 +43,11 @@ method_get_stats(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)
     return sd_bus_error_set_errno(ret_error, r);
 
   APPEND_STAT("total_pkts", total_pkts);
+  APPEND_STAT("if0_pkts", if0_pkts);
+  APPEND_STAT("if1_pkts", if1_pkts);
+  APPEND_STAT("tx_drops", tx_drops);
+  APPEND_STAT("ring_enq_drops", ring_enq_drops);
+  APPEND_STAT("tap_drops", tap_drops);
 #undef APPEND_STAT
 
   r = sd_bus_message_close_container(reply);
