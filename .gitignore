@@ -7,3 +7,5 @@ _postinstall
 _preinstall
 *.map
 *.o
+*.o.cmd
+*.o.d
