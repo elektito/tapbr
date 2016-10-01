@@ -130,3 +130,6 @@ To get the complete list of `tapbr` options run:
 system bus however, denies access to daemons not explicitly
 allowed. In order to allow `tapbr` access to the system bus, copy
 tapbr.conf to `/etc/dbus-1/system.d/`.
+
+There is a `tapbrctl.py` script that can be used to query or control
+`tapbr`. This script uses the dbus interface for its operation.
