@@ -11,6 +11,7 @@
 #include <argp.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 #include <signal.h>
 #include <unistd.h>
 
@@ -20,12 +21,12 @@
 
 #define RING_PREFIX_MAX_SIZE 256
 
-size_t total_pkts = 0;
-size_t if0_pkts = 0;
-size_t if1_pkts = 0;
-size_t tx_drops = 0;
-size_t ring_enq_drops = 0;
-size_t tap_drops = 0;
+atomic_size_t total_pkts = 0;
+atomic_size_t if0_pkts = 0;
+atomic_size_t if1_pkts = 0;
+atomic_size_t tx_drops = 0;
+atomic_size_t ring_enq_drops = 0;
+atomic_size_t tap_drops = 0;
 
 static const struct argp_option options[] = {
   {"version", 'V', 0, 0, "Print program version and exit.", 0},
@@ -141,11 +142,11 @@ bridge_routine(void *arg)
       }
 
       fprintf(stderr, "Got %d packets.\n", npkts);
-      total_pkts += npkts;
+      atomic_fetch_add_explicit(&total_pkts, npkts, memory_order_relaxed);
       if (i == 0)
-        if0_pkts += npkts;
+        atomic_fetch_add_explicit(&if0_pkts, npkts, memory_order_relaxed);
       else
-        if1_pkts += npkts;
+        atomic_fetch_add_explicit(&if1_pkts, npkts, memory_order_relaxed);
 
       for (j = 0; j < npkts; ++j) {
         clones[j] = rte_pktmbuf_clone(pkts[j], rx_pool);
@@ -160,7 +161,7 @@ bridge_routine(void *arg)
         for (j = ret; j < npkts; j++) {
           rte_pktmbuf_free(pkts[j]);
         }
-        tx_drops += npkts - ret;
+        atomic_fetch_add_explicit(&tx_drops, npkts - ret, memory_order_relaxed);
       }
 
       if (*args->ring_prefix) {
@@ -175,7 +176,7 @@ bridge_routine(void *arg)
             fprintf(stderr, "Not enough room in output ring: %s%d.\n",
                     args->ring_prefix, ring_idx);
             rte_pktmbuf_free(pkts[j]);
-            ++ring_enq_drops;
+            atomic_fetch_add_explicit(&ring_enq_drops, 1, memory_order_relaxed);
           }
         }
       } else {
@@ -188,7 +189,7 @@ bridge_routine(void *arg)
           for (j = ret; j < npkts; j++) {
             rte_pktmbuf_free(pkts[j]);
           }
-          tap_drops += npkts - ret;
+          atomic_fetch_add_explicit(&tap_drops, npkts - ret, memory_order_relaxed);
         }
       }
     }

@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdatomic.h>
 
 #define _cleanup_(x) __attribute__((cleanup(x)))
 
@@ -14,12 +15,12 @@ static int started = 0;
 
 extern int keep_running;
 
-extern size_t total_pkts;
-extern size_t if0_pkts;
-extern size_t if1_pkts;
-extern size_t tx_drops;
-extern size_t ring_enq_drops;
-extern size_t tap_drops;
+extern _Atomic size_t total_pkts;
+extern _Atomic size_t if0_pkts;
+extern _Atomic size_t if1_pkts;
+extern _Atomic size_t tx_drops;
+extern _Atomic size_t ring_enq_drops;
+extern _Atomic size_t tap_drops;
 
 static int
 method_get_stats(sd_bus_message *m, void *userdata, sd_bus_error *ret_error)

@@ -2,7 +2,7 @@ include $(RTE_SDK)/mk/rte.vars.mk
 
 APP = tapbr
 
-CFLAGS += -O0 -g
+CFLAGS += -O0 -g -std=gnu11
 CFLAGS += $(WERROR_FLAGS) -Werror -Wno-int-to-pointer-cast
 CFLAGS += $(shell pkg-config --cflags libsystemd)
 
