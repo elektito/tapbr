@@ -340,7 +340,7 @@ read_args(int argc, char *argv[], struct arguments *args)
              "--tap cannot be used with --rings or --ring-prefix.\n");
   } else if (args->rings && !*args->ring_prefix) {
     strcpy(args->ring_prefix, "tapbr");
-  } else if ((!args->rings) & *args->ring_prefix) {
+  } else if ((!args->rings) && *args->ring_prefix) {
     args->rings = 1;
   } else if (args->tap == -1 && !args->rings && !*args->ring_prefix) {
     args->tap = 2;
