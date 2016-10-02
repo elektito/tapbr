@@ -110,7 +110,7 @@ Now you can run tapbr like:
 
     Processing queue 0 on CPU 1.
 
-If you want the mirrored packet to be distributed between four DPDK
+If you want the mirrored packets to be distributed between four DPDK
 rings named myring0, myring1, myring2 and myring3, run:
 
     $ sudo ./tapbr -- -R myring -N 4
