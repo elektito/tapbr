@@ -150,6 +150,9 @@ bridge_routine(void *arg)
 
       for (j = 0; j < npkts; ++j) {
         clones[j] = rte_pktmbuf_clone(pkts[j], rx_pool);
+        if (unlikely(clones[j] == 0)) {
+          fprintf(stderr, "Could not clone packet.\n");
+        }
       }
 
       ret = rte_eth_tx_burst(other_intf, q, pkts, npkts);
@@ -168,14 +171,14 @@ bridge_routine(void *arg)
         /* send mirrored packets to output rings */
         for (j = 0; j < npkts; ++j) {
           ring_idx = pkts[j]->hash.rss % args->rings;
-          ret = rte_ring_enqueue(output_rings[ring_idx], pkts[j]);
+          ret = rte_ring_enqueue(output_rings[ring_idx], clones[j]);
           if (ret == -EDQUOT) {
             fprintf(stderr, "Quota exceeded in output ring: %s%d.\n",
                     args->ring_prefix, ring_idx);
           } else if (ret == -ENOBUFS) {
             fprintf(stderr, "Not enough room in output ring: %s%d.\n",
                     args->ring_prefix, ring_idx);
-            rte_pktmbuf_free(pkts[j]);
+            rte_pktmbuf_free(clones[j]);
             atomic_fetch_add_explicit(&ring_enq_drops, 1, memory_order_relaxed);
           }
         }
