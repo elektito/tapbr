@@ -190,7 +190,7 @@ bridge_routine(void *arg)
                  "%d packets dropped.\n",
                  npkts, q, args->tap, npkts - ret);
           for (j = ret; j < npkts; j++) {
-            rte_pktmbuf_free(pkts[j]);
+            rte_pktmbuf_free(clones[j]);
           }
           atomic_fetch_add_explicit(&tap_drops, npkts - ret, memory_order_relaxed);
         }
